@@ -1,0 +1,300 @@
+---
+title: "Explorary Data Analysis - Milestone Report - Week 2"
+author: "S Ridgway"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## *Data Science Specialization Capstone Project*
+
+The goal of this project is to demonstrate that i have loaded in the required dataset and become familiar with it using exploratory analysis techniques. This report will be a brief outline of this analysis and how i intend to move forward to my predictive model.
+
+The first step in building a predictive model for text is understanding the distribution and relationship between the words, tokens, and phrases in the text. The goal of this task is to understand the basic relationships you observe in the data and prepare to build your first linguistic models.
+
+This report is intended for a non-data scientist manager and thus i have hidden the R Code Chunks but the full RMD file can be found here.(https://github.com/Ridgway1000/Capstone-Project)
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.align = "center")
+```
+
+
+```{r}
+#load libraries
+library(stringi) 
+library(stringr)
+library(tm) 
+library(LaF) 
+library(dplyr)
+library(tidytext)
+library(ggplot2)
+library(gridExtra)
+library(scales)
+library(data.table)
+library(kableExtra)
+library(wordcloud)
+library(stopwords)
+
+set.seed(17)
+```
+
+## The Data Load
+
+For the initial data-load i decided to only load in the English (US) version of each file. This consists of three large text files for Blogs, News and Twitter. First of all i built an overview of the files, displayed in the table below to show the size of each data-set that i was working with. We can see these are incredibly large and very memory intensive.
+
+```{r}
+# load in the full data files from our local directory
+loaded_files <- list.files()
+blogs <- readLines(loaded_files[1], encoding = "UTF-8", skipNul = TRUE)
+news <- readLines(loaded_files[2], encoding = "UTF-8", skipNul = TRUE)
+twitter <- readLines(loaded_files[3], encoding = "UTF-8", skipNul = TRUE)
+
+# stats of our datafiless using stringi
+blogsStats <- stri_stats_general(blogs)
+newsStats <- stri_stats_general(news)
+twitterStats <- stri_stats_general(twitter)
+
+
+# use stringi to do a wordcount
+blogsWords <- stringi::stri_count_words(blogs)
+newsWords <- stringi::stri_count_words(news)
+twitterWords <- stringi::stri_count_words(twitter)
+
+
+# Create a data frame of the above stats
+stats <- data.frame(file = c("blogs", "news", "twitter"),
+                           totalLines = c(stri_stats_general(blogs)[1], stri_stats_general(news)[1], stri_stats_general(twitter)[1]),
+                           totalWords = c(sum(blogsWords), sum(newsWords), sum(twitterWords)),
+                           totalChars = c(stri_stats_general(blogs)[3], stri_stats_general(news)[3], stri_stats_general(twitter)[3]),
+                           averageWords = c(mean(blogsWords), mean(newsWords), mean(twitterWords)),
+                           minWords = c(min(blogsWords), min(newsWords), min(twitterWords)),
+                           maxWords = c(max(blogsWords), max(newsWords), max(twitterWords)),
+                           averageChars = c(mean(stringi::stri_count_boundaries(blogs, type = "character")), mean(stringi::stri_count_boundaries(news, type = "character")), mean(stringi::stri_count_boundaries(twitter, type = "character"))),
+                           minChars = c(min(stringi::stri_count_boundaries(blogs, type = "character")), min(stringi::stri_count_boundaries(news, type = "character")), min(stringi::stri_count_boundaries(twitter, type = "character"))),
+                           maxChars = c(max(stringi::stri_count_boundaries(blogs, type = "character")), max(stringi::stri_count_boundaries(news, type = "character")), max(stringi::stri_count_boundaries(twitter, type = "character"))))
+
+
+
+# Table output of the above data using kable.
+kable(stats, format = "html", align=rep('c', 4)) %>%
+        kable_styling(bootstrap_options = "striped", font_size = 9) %>%
+        column_spec(1, bold = TRUE, ) %>%
+        column_spec(2:4, background = "#FFE9B9") %>%
+        column_spec(5:7, background = "#E8B6FE") %>%
+        column_spec(8:10, background = "#CCEDFB") %>%
+        add_header_above(c(" ", "Totals" = 3, "Words" = 3, "Characters" = 3))
+```
+
+
+## Data Cleaning / Sampling
+
+Due to the large file size, i decided that it was more appropriate to take a sample of each dataset, I therefore created a 5% subset of each. I then cleansed the sub-setted data to remove English swear words that are housed in a separate file.
+
+
+
+```{r}
+
+
+# Store a list of english swear words from file downloaded and saveds locally
+swearwords <- read.table(file = "Swear.csv")
+
+# subset the data to a more manageable size. 5% of each dataset
+mini_blogs <- sample(blogs, length(blogs)*.05)
+mini_news <- sample(news, length(news)*.05)
+mini_twitter <- sample(twitter, length(twitter)*.05)
+
+# use remove Words from tm library to remove all the swear words that are within our swearwords file
+clean_blogs <- removeWords(str_to_lower(mini_blogs), swearwords[,1])
+clean_news <- removeWords(str_to_lower(mini_news), swearwords[,1])
+clean_twitter <- removeWords(str_to_lower(mini_twitter), swearwords[,1])
+
+```
+
+
+## Tokenizing the subsetted data and demonstrate frequency of words (N- Grams)
+
+The next step i took was to tokenize the cleaned up data which splits each word into its own row. As part of this process i also removed any 'stopwords', which are extremely common words not valuable for an analysis for example a, of, the, etc.
+
+Using the tokenized data, i plotted the most common singular words into the table below:
+
+
+```{r}
+
+#create data-frames for each file
+clean_blogs_df <- data.frame(text = clean_blogs, stringsAsFactors = FALSE)
+clean_news_df <- data.frame(text = clean_news, stringsAsFactors = FALSE)
+clean_twitter_df <- data.frame(text = clean_twitter, stringsAsFactors = FALSE)
+
+tokenized_blogs <- clean_blogs_df %>%
+        unnest_tokens(output = word, input = text) %>%
+        anti_join(get_stopwords())
+tokenized_news <- clean_news_df %>%
+        unnest_tokens(output = word, input = text) %>%
+        anti_join(get_stopwords())
+tokenized_twitter <- clean_twitter_df %>%
+        unnest_tokens(output = word, input = text) %>%
+        anti_join(get_stopwords())
+
+
+frequent_blogs <- tokenized_blogs %>%
+        count(word, sort = TRUE) %>%
+        mutate(file = "Blogs") %>%
+        top_n(n = 10, wt = n)
+frequent_news <- tokenized_news %>%
+        count(word, sort = TRUE) %>%
+        mutate(file = "News") %>%
+        top_n(n = 10, wt = n)
+frequent_twitter <- tokenized_twitter %>%
+        count(word, sort = TRUE) %>%
+        mutate(file = "Twitter") %>%
+        top_n(n = 10, wt = n)
+
+
+frequent_all <- rbind.data.frame(frequent_blogs, frequent_news, frequent_twitter)
+
+#plot top 10 most frequent words across the files
+ggplot(frequent_all, aes(x = reorder(word,desc(n)), y = n, fill = n)) +
+        geom_bar(stat = "identity", alpha = .95) +
+        scale_fill_gradient(low = "#cd848f", high = "#9ad590") +
+        labs(y = "", x = "", title = "Top 10 frequent Words") +
+        facet_grid(.~file, scales = "free_x") +
+        coord_flip() +
+        theme(axis.text.x = element_text(angle = 50, hjust = 1), legend.position = "none")
+```
+
+
+## Bi-Grams and Trigrams
+
+I decided after this initial exploration of most common singular words to also map this out visually  for both Bi-Grams (2 word) and Tri-Grams (3 word) frequencies.
+
+```{r}
+
+# Bigram
+bi_Analysis <- function(text, filetype) {
+        text %>%
+                unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+                tidyr::separate(bigram, c("word1", "word2"), sep = " ") %>%
+                na.omit() %>%
+                filter(!word1 %in% stop_words$word,
+                       !word2 %in% stop_words$word) %>%
+                count(word1, word2, sort = TRUE) %>%
+                top_n(n = 10, wt = n) %>%
+                slice(row_number(1:10)) %>% 
+                mutate(bigram = paste(word1, word2, sep = " ")) %>%
+                mutate(file = filetype)
+}
+
+
+blogs_bi <- bi_Analysis(clean_blogs_df, "Blogs")
+news_bi <- bi_Analysis(clean_news_df, "News")
+twitter_bi <- bi_Analysis(clean_twitter_df, "Twitter")
+
+bi_all <- as.data.frame(rbind.data.frame(blogs_bi, news_bi, twitter_bi))
+
+
+# Trigram
+tri_Analysis <- function(text, filetype) {
+        text %>%
+                unnest_tokens(trigram, text, token = "ngrams", n = 3) %>%
+                tidyr::separate(trigram, c("word1", "word2", "word3"), sep = " ") %>%
+                na.omit() %>%
+                filter(!word1 %in% stop_words$word,
+                       !word2 %in% stop_words$word,
+                       !word3 %in% stop_words$word) %>%
+                count(word1, word2, word3, sort = TRUE) %>%
+                top_n(n = 10, wt = n) %>%
+                slice(row_number(1:10)) %>%
+                mutate(trigram = paste(word1, word2, word3, sep = " ")) %>%
+                mutate(file = filetype)
+}
+
+blogs_tri <- tri_Analysis(clean_blogs_df, "Blogs") 
+news_tri <- tri_Analysis(clean_news_df, "News")
+twitter_tri <- tri_Analysis(clean_twitter_df, "Twitter")
+
+# bind all of my above trigram analysis into 1 data-frame.
+tri_all <- as.data.frame(rbind.data.frame(blogs_tri, news_tri, twitter_tri))
+
+# Plot the above
+ngram_plot <- function(data, num_gram) {
+        label <- as.character(str_to_title(num_gram))
+        
+        ggplot(data, aes_string(x = num_gram)) +
+                aes(y = n, fill = as.factor(file)) +
+                geom_bar(stat = "identity") +
+                facet_grid(file~., scales = "free_y") +
+                coord_flip() +
+                #labs(title = paste("Most Frequent", label, collapse = ""), y = label, x = "Occurrences", fill = "File") +
+                theme(axis.text.y = element_text(size = 10)) +
+                theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10), legend.position = "none")
+        
+}
+
+
+top_bi <- ngram_plot(bi_all, "bigram")
+top_tri <- ngram_plot(tri_all, "trigram")
+grid.arrange(top_bi, top_tri, top = "Most frequent Bi-grams & Tri-grams", ncol = 2)
+```
+
+## Word Cloud on Overall file.
+
+Finally, i decided to bind my 3 tokenized files together into 1 file to visualize into word clouds below. The word clouds are restricted by a minimum frequency of 75 (N), 40 (Bi) and 3(Tri) for a more appropriate visual.
+
+```{r}
+
+# create a singular Tokenized file
+
+tokenized <- as.data.frame(rbind.data.frame(tokenized_blogs, tokenized_news, tokenized_twitter))
+
+allWordsTable <- table(tokenized$word)
+
+# Create a word cloud for only single words that appear a minimum of 75x with a maximum number of words at 400.
+wordcloud(names(allWordsTable), as.numeric(allWordsTable), min.freq = 75, max.words = 400, colors = brewer.pal(8, "Set1"), scale = c(4, .5))
+
+
+# Bi-Grams
+
+clean_all <- as.data.frame(rbind.data.frame(clean_blogs_df, clean_news_df, clean_twitter_df))
+
+# create a data-frame of all bigrams and count them
+
+bi_all <- 
+        clean_all %>%
+                unnest_tokens(bigram, text, token = "ngrams", n = 2) %>%
+                tidyr::separate(bigram, c("word1", "word2"), sep = " ") %>%
+                na.omit() %>%
+                filter(!word1 %in% stop_words$word,
+                       !word2 %in% stop_words$word) %>%
+                count(word1, word2, sort = TRUE) %>%
+                mutate(bigram = paste(word1, word2, sep = " "))
+
+
+# Create a word cloud for bigrams that appear a minimum of 40x with a maximum number of words at 300.
+wordcloud(bi_all$bigram, bi_all$n, min.freq = 40, max.words = 300, colors = brewer.pal(8, "Dark2"), scale = c(5, .5))
+
+
+# Trigrams
+
+# Create a data-frame of all trigrams and count them
+tri_all <- 
+        clean_all %>%
+        unnest_tokens(trigram, text, token = "ngrams", n = 3) %>%
+        tidyr::separate(trigram, c("word1", "word2", "word3"), sep = " ") %>%
+        na.omit() %>%
+        filter(!word1 %in% stop_words$word,
+               !word2 %in% stop_words$word,
+               !word3 %in% stop_words$word) %>%
+        count(word1, word2, word3, sort = TRUE) %>%
+        mutate(trigram = paste(word1, word2, word3, sep = " "))
+
+
+# Create a word cloud for trigrams that appear a minimum of 3x with a maximum number of words at 300.
+wordcloud(tri_all$trigram, tri_all$n, min.freq = 3, max.words = 300, colors = brewer.pal(8, "Spectral"), scale = c(5, .5))
+```
+
+## Summary
+
+As i have established, the data sets are large and processing them requires time and computing resources.By analysing the frequencies it may be possible to ignore 'rare' words within our Corpus leading to a less comprehensive but more efficient predictive model. It is important to find the balance in my final outcome.  
+
+In the final model, the data will need to be cleaned some more (remove numbers, check punctuation etc) and contained within one Corpus. I will then use the tokenized ngrams approach to build an algorithm (like the Hidden Markov model) to predict the next word given the preceding one.
